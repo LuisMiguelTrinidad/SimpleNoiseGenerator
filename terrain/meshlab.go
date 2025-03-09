@@ -8,15 +8,6 @@ import (
 	"strings"
 )
 
-// RenderPLYToIsometricPNG renders a .ply file in isometric view using MeshLab
-// and saves the result as a PNG image.
-//
-// Parameters:
-//   - inputPath: Path to the input .ply file
-//   - outputPath: Path where the output PNG will be saved
-//
-// Returns:
-//   - error: Any error that occurred during the rendering process
 func CreateIsometricView(inputPath, outputPath string) error {
 	// Verify input file exists
 	if _, err := os.Stat(inputPath); os.IsNotExist(err) {

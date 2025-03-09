@@ -1,6 +1,9 @@
+#!/usr/bin/env python3
 import pyvista as pv
 import glob
 import imageio.v2 as imageio
+import argparse
+import os
 
 def render_terrain(input_file="images/eroded_terrain.ply", 
                    output_file="terrain_render.png",
@@ -60,19 +63,34 @@ def render_terrain(input_file="images/eroded_terrain.ply",
     return output_file
 
 if __name__ == "__main__":
-    for i in range(10):
-        render_terrain(input_file=f"images/eroded_terrain{i}.ply", output_file=f"images/terrain_render_{i}.png")
-
-    # Generate a GIF from the rendered images
+    # Configurar parser de argumentos
+    parser = argparse.ArgumentParser(description="Renderizador de terreno 3D")
+    parser.add_argument("-i", "--input", default="images/eroded_terrain.ply",
+                        help="Ruta al archivo .ply de entrada")
+    parser.add_argument("-o", "--output", default="terrain_render.png",
+                        help="Ruta donde guardar la imagen renderizada")
+    parser.add_argument("-c", "--cmap", default="terrain",
+                        help="Mapa de colores para la visualización")
+    parser.add_argument("-b", "--background", default="black",
+                        help="Color de fondo para el render")
+    parser.add_argument("-v", "--view", default="isometric",
+                        choices=["isometric", "xy", "xz", "yz"],
+                        help="Tipo de vista")
     
-
-    # Get all the rendered images in order
-    image_files = sorted(glob.glob("images/terrain_render_*.png"))
-
-    # Create a GIF with loop=0 (infinite looping)
-    with imageio.get_writer("images/terrain_animation.gif", mode="I", loop=0) as writer:
-        for image_file in image_files:
-            image = imageio.imread(image_file)
-            writer.append_data(image)
-
-    print("GIF animation created at: images/terrain_animation.gif")
+    args = parser.parse_args()
+    
+    # Verificar que el archivo de entrada existe
+    if not os.path.exists(args.input):
+        print(f"ERROR: El archivo {args.input} no existe")
+        exit(1)
+    
+    # Llamar a la función con los parámetros de la línea de comandos
+    output = render_terrain(
+        input_file=args.input,
+        output_file=args.output,
+        cmap=args.cmap,
+        background_color=args.background,
+        view_type=args.view
+    )
+    
+    print(f"Imagen generada correctamente: {output}")

@@ -3,7 +3,6 @@ package terrain
 import (
 	"math"
 	"math/rand"
-	"time"
 )
 
 // Terrain represents a heightmap terrain.
@@ -28,19 +27,18 @@ func NewTerrain(size int) *Terrain {
 type ErosionParams struct {
 	Iterations       int
 	DropletCount     int
-	ErosionRadius    float64
 	Inertia          float64
 	SedimentCapacity float64
 	Evaporation      float64
 	Gravity          float64
+	Seed             int64
 }
 
 // ApplyErosion applies hydraulic erosion to the terrain using the specified parameters.
 func (t *Terrain) ApplyErosion(params ErosionParams) {
-	// ...existing code...
-	rand.Seed(time.Now().UnixNano())
+	rand.New(rand.NewSource(params.Seed))
 
-	for i := 0; i < params.DropletCount; i++ {
+	for range params.DropletCount {
 		// Initialize droplet
 		x := rand.Float64() * float64(t.Size-1)
 		y := rand.Float64() * float64(t.Size-1)
@@ -50,7 +48,7 @@ func (t *Terrain) ApplyErosion(params ErosionParams) {
 		water := 1.0
 		sediment := 0.0
 
-		for j := 0; j < params.Iterations; j++ {
+		for range params.Iterations {
 			// Add NaN checks
 			if math.IsNaN(x) || math.IsNaN(y) {
 				break
@@ -63,7 +61,6 @@ func (t *Terrain) ApplyErosion(params ErosionParams) {
 				break
 			}
 
-			// ...existing code...
 			height := t.Heightmap[xi][yi]
 			gradX := t.Heightmap[xi+1][yi] - height
 			gradY := t.Heightmap[xi][yi+1] - height
@@ -75,6 +72,7 @@ func (t *Terrain) ApplyErosion(params ErosionParams) {
 			if math.IsNaN(lenDir) {
 				break
 			}
+
 			if lenDir > 0 {
 				dirX /= lenDir
 				dirY /= lenDir
