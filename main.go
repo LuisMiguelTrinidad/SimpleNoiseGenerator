@@ -2,92 +2,20 @@ package main
 
 import (
 	"fmt"
-	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"time"
 
 	"main/terrain"
 )
 
-func createNoiseMap(mapseed int64, mapSize int, mapScale float64, mapOctaves int, smoothingFunction func(float64) float64) *terrain.Terrain {
-	noise := terrain.NewOpenSimplex(mapseed)
-	terrainObj := terrain.NewTerrain(mapSize)
-
-	// Precompute amplitudeSum, freqs and amps
-	freqs := make([]float64, mapOctaves)
-	amps := make([]float64, mapOctaves)
-	persistence := 0.5
-	amplitudeSum := 0.0
-	for i := range mapOctaves {
-		freqs[i] = math.Pow(2, float64(i))
-		amps[i] = math.Pow(persistence, float64(i))
-		amplitudeSum += amps[i]
-	}
-
-	// Generate initial heightmap - Sequential version
-	for y := range mapSize {
-		for x := range mapSize {
-			var total float64
-			for i := range mapOctaves {
-				nx := float64(x) / mapScale * freqs[i]
-				ny := float64(y) / mapScale * freqs[i]
-				total += noise.Eval2(nx, ny) * amps[i]
-			}
-			terrainObj.Heightmap[x][y] = total / amplitudeSum
-		}
-	}
-
-	for y := range mapSize {
-		for x := range mapSize {
-			terrainObj.Heightmap[x][y] = smoothingFunction(terrainObj.Heightmap[x][y]) * 256
-		}
-	}
-	return terrainObj
-}
-
-// Aplica erosión hidráulica usando la biblioteca rainfall
-func applyErosion(t *terrain.Terrain, iterations int, dropletCount int, inertia float64,
-	sedimentCapacity float64, evaporation float64, gravity float64, seed int64) error {
-	params := terrain.ErosionParams{
-		Iterations:       iterations,
-		DropletCount:     dropletCount,
-		Inertia:          inertia,
-		SedimentCapacity: sedimentCapacity,
-		Evaporation:      evaporation,
-		Gravity:          gravity,
-		Seed:             seed,
-	}
-	t.ApplyErosion(params)
-	return nil
-}
-
 func main() {
-	start_time := time.Now()
-
 	const (
-		MapSize    = 512
+		MapSize    = 1024
 		MapScale   = 2048
+		MapHeight  = 256
 		MapOctaves = 12
-		MapSeed    = 0
-	)
-
-	MapSmoothingFunction := func(height float64) float64 {
-		for range 1 {
-			height = 0.75*math.Copysign((math.Sin(math.Pi*height-math.Pi/2)/2+0.5), height) + 0.25*height
-		}
-		return height
-	}
-
-	const (
-		ErosionIterations       = 100
-		ErosionDropletCount     = 200000
-		ErosionInertia          = 0.05
-		ErosionSedimentCapacity = 0.3
-		ErosionEvaporation      = 1 / MapSize
-		ErosionGravity          = 9.8
-		ErosionSeed             = 0
+		MapSeed    = 3421
 	)
 
 	// Create output directory if not exists
@@ -96,42 +24,76 @@ func main() {
 		meshDir  = "meshes"
 	)
 
+	ErosionParams := terrain.ErosionParams{
+		MaxSteps:         100,
+		Inertia:          0.05,
+		SedimentCapacity: 3.0,
+		ErosionRate:      0.3,
+		DepositionRate:   0.3,
+		EvaporationRate:  0.01,
+		Gravity:          9.8,
+		MinSlope:         0.01,
+		CellSize:         1.0,
+	}
+	ErosionDropletCount := 200000
+
 	os.MkdirAll(imageDir, 0755)
 	os.MkdirAll(meshDir, 0755)
+	start_time := time.Now()
+	fmt.Printf("\nInicio de generación: %s\n", time.Now().Format("15:04:05"))
 
-	fmt.Printf("%v Generating terrain...\n", time.Since(start_time))
+	Smoother := func(height float64) float64 {
+		height = terrain.GreatPlains(height)
+		height = terrain.Plateau(height, 0.75)
+		height = terrain.Plateau(height, 0.75)
+		height = terrain.Molone(height, 0.8)
+		height = terrain.GreatPlains(height)
+		height = terrain.Plateau(height, 0.2)
+		return height
+	}
 
-	terrainObj := createNoiseMap(MapSeed, MapSize, MapScale, MapOctaves, MapSmoothingFunction)
-
-	fmt.Printf("%v Aplicando erosión con Rainfall...\n", time.Since(start_time))
+	noiseStart := time.Now()
+	heightmap := terrain.CreateNoiseMap(MapSeed, MapSize, MapScale, MapOctaves, Smoother)
+	fmt.Printf("\nGeneración de mapa de ruido: %.3f segundos\n", time.Since(noiseStart).Seconds())
 
 	const num = 10
 	for i := range num {
-		// Apply erosion and save result
-		applyErosion(terrainObj, ErosionIterations, ErosionDropletCount, ErosionInertia,
-			ErosionSedimentCapacity, ErosionEvaporation, ErosionGravity, ErosionSeed)
+		iterStart := time.Now()
+		fmt.Printf("\n--- Iteración %d/%d ---\n", i+1, num)
 
-		// Generate and save mesh
-		vertices, vertexColors := terrainObj.GenerateVertices()
-		faces := terrainObj.GenerateFaces()
-		plyPath := filepath.Join(meshDir, fmt.Sprintf("eroded_terrain_%d.ply", i))
-		terrain.SavePLY(plyPath, vertices, faces, vertexColors)
-
-		// Render image with Python script
-		imgPath := filepath.Join(imageDir, fmt.Sprintf("terrain_render_%d.png", i))
-		cmd := exec.Command("python", "terrain/run.py",
-			"-i", plyPath,
-			"-o", imgPath,
-			"-c", "terrain",
-			"-b", "black",
-			"-v", "isometric")
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			fmt.Printf("Error running Python script: %v\n", err)
-		} else {
-			fmt.Printf("%v, %v/%vSaved image to %s\n", time.Since(start_time), i, num, imgPath)
+		// Aplicar erosión con el nuevo enfoque (solo necesita el número de gotas)
+		scaleStart := time.Now()
+		// Create a scaled copy of heightmap from [-1,1] to [0,256]
+		scaledHeightmap := make([][]float64, len(heightmap))
+		for y := range heightmap {
+			scaledHeightmap[y] = make([]float64, len(heightmap[y]))
+			for x := range heightmap[y] {
+				scaledHeightmap[y][x] = (heightmap[y][x] + 1) * MapHeight / 2
+			}
 		}
+		fmt.Printf("\nEscalado del mapa: %.3f segundos\n", time.Since(scaleStart).Seconds())
+
+		imgPath := filepath.Join(imageDir, fmt.Sprintf("terrain_render_%d.png", i))
+		meshPath := filepath.Join(meshDir, fmt.Sprintf("eroded_terrain_%d.ply", i))
+
+		meshStart := time.Now()
+		vertices, faces, colors := terrain.GenerateHeightmapMesh(scaledHeightmap)
+		fmt.Printf("\nGeneración de malla: %.3f segundos\n", time.Since(meshStart).Seconds())
+
+		plyStart := time.Now()
+		terrain.SavePLY(meshPath, vertices, faces, colors)
+		fmt.Printf("\nGuardado del archivo PLY: %.3f segundos\n", time.Since(plyStart).Seconds())
+
+		renderStart := time.Now()
+		terrain.RenderTerrainIsometric(meshPath, imgPath)
+		fmt.Printf("\nRenderizado: %.3f segundos\n", time.Since(renderStart).Seconds())
+
+		erosionStart := time.Now()
+		heightmap = terrain.ApplyErosion(heightmap, ErosionDropletCount, ErosionParams)
+		fmt.Printf("\nAplicación de erosión (%d gotas): %.3f segundos\n", ErosionDropletCount, time.Since(erosionStart).Seconds())
+
+		fmt.Printf("\nTiempo total de iteración %d: %.3f segundos\n", i+1, time.Since(iterStart).Seconds())
 	}
 
+	fmt.Printf("\nTiempo total de ejecución: %.3f segundos (%.2f minutos)\n", time.Since(start_time).Seconds(), time.Since(start_time).Minutes())
 }
